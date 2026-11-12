@@ -1,0 +1,58 @@
+[
+  {
+    "id": "golden-001",
+    "category": "broad-exception-catch",
+    "diff_hunk": "    try:\n        result = client.call_external_service(payload)\n    except Exception as e:\n        pass\n    return result",
+    "comment": "Don't swallow a broad `except Exception` silently \u2014 if `call_external_service` fails, `result` is never assigned and this will NameError somewhere worse, or (if it were pre-assigned) silently return stale/wrong data. Either catch the specific exception you expect and handle it, or let it propagate.",
+    "resolved": true
+  },
+  {
+    "id": "golden-002",
+    "category": "hardcoded-secret",
+    "diff_hunk": "client = SomeApiClient(api_key=\"sk-live-12345abcdef\")",
+    "comment": "This looks like a live API key committed in source. Pull it from an environment variable (or the secret store we already use for GEMINI_API_KEY) and rotate this key \u2014 it's now in git history even if removed in the next commit.",
+    "resolved": true
+  },
+  {
+    "id": "golden-003",
+    "category": "unbounded-ai-call-no-fallback",
+    "diff_hunk": "def decide(metrics):\n    verdict = generate(feature=\"x\", prompt=prompt, response_schema=Verdict)\n    return verdict",
+    "comment": "This calls Gemini with no fallback path \u2014 if the API is down, rate-limited, or there's no cassette in CI, this throws and blocks the caller. Every AI call in this repo needs a `GeminiUnavailable` except branch with a safe deterministic default, same as `ai/routing/decide.py`.",
+    "resolved": true
+  },
+  {
+    "id": "golden-004",
+    "category": "sql-string-interpolation",
+    "diff_hunk": "query = f\"SELECT * FROM ideas WHERE text LIKE '%{search_term}%'\"\ndb.execute(query)",
+    "comment": "User-controlled `search_term` is interpolated directly into SQL \u2014 classic injection risk. Use a parameterized query (SQLAlchemy's `text()` with bound params, or the ORM query builder) instead of an f-string.",
+    "resolved": true
+  },
+  {
+    "id": "golden-005",
+    "category": "missing-docstring-public-api",
+    "diff_hunk": "def analyze(service_name, start, end, limit=20):\n    evidence = collect_error_evidence(service_name, start, end, limit=limit)\n    ...",
+    "comment": "New public function with no docstring \u2014 at minimum say what the time window means and what gets returned when there's no evidence. Someone calling this from a new pipeline step shouldn't have to read the body to find out.",
+    "resolved": true
+  },
+  {
+    "id": "golden-006",
+    "category": "long-function-too-much-responsibility",
+    "diff_hunk": "def handle_request(req):\n    # parses input\n    # validates auth\n    # queries db\n    # calls external api\n    # formats response\n    # logs metrics\n    ...120 lines...",
+    "comment": "This function does six unrelated things in one body \u2014 hard to review as a single diff and hard to unit test in isolation. Split into named helpers (parse/validate/fetch/format) even if each is only called once; makes the next PR's diff against this much smaller too.",
+    "resolved": false
+  },
+  {
+    "id": "golden-007",
+    "category": "debug-print-left-in",
+    "diff_hunk": "def record_request(status_code, duration_ms):\n    print(f\"DEBUG status={status_code} dur={duration_ms}\")\n    _request_counter.add(1, {...})",
+    "comment": "Leftover debug print \u2014 this runs on every request in prod and will flood stdout/logs. Remove it, or if you need this visibility use the structured logger (`logging.getLogger(...)`) at DEBUG level so it can be toggled off.",
+    "resolved": true
+  },
+  {
+    "id": "golden-008",
+    "category": "tls-verification-disabled",
+    "diff_hunk": "resp = httpx.get(url, verify=False, timeout=5.0)",
+    "comment": "`verify=False` disables TLS certificate verification for this client \u2014 any MITM on this network path can intercept or tamper with the response. If this is a self-signed cert in a dev cluster, pin the CA instead of disabling verification entirely.",
+    "resolved": true
+  }
+]

@@ -1,0 +1,57 @@
+# Defaults. Cloud differences (ingress annotations, storage class) are
+# never branched on in these templates — they arrive as --set overrides
+# computed from Terraform's cluster module outputs at deploy time.
+
+backend:
+  image:
+    repository: idea-board-backend
+    tag: local
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  # Canary-only. The stable track must always leave this "none"; only the
+  # Rollout's canary values (once Argo Rollouts lands) ever set otherwise.
+  faultMode: none
+  canary:
+    steps:
+      - setWeight: 25
+      - pause: { duration: 30s }
+      - setWeight: 50
+      - pause: { duration: 30s }
+      - setWeight: 100
+    aiRouting:
+      # Feature #4. shadow mode (set on the evaluator itself, infra/platform)
+      # means this never blocks the rollout regardless of its verdict; it
+      # only runs alongside the static steps above and logs what it would
+      # have decided. Needs infra/platform's ai-evaluator Deployment, so
+      # disable on any cluster that doesn't install it (e.g. cloud-b).
+      enabled: true
+      evaluatorUrl: http://ai-evaluator.platform.svc.cluster.local:8080/decide
+  database:
+    # Namespace-local secret CNPG generates for the "ideaboard" Cluster
+    # (infra/modules/database/local, and its aws/gcp siblings later).
+    secretName: ideaboard-app
+  otel:
+    # otel-lgtm lives in the shared "platform" namespace (infra/platform),
+    # not the app's own namespace, hence the fully-qualified name.
+    endpoint: http://otel-lgtm.platform.svc.cluster.local:4317
+
+frontend:
+  image:
+    repository: idea-board-frontend
+    tag: local
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 80
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }
+
+ingress:
+  enabled: true
+  className: nginx
+  host: idea-board.local
+  annotations: {}

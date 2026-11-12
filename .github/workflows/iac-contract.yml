@@ -1,0 +1,49 @@
+name: iac-contract
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+
+jobs:
+  # Deterministic (no AI): proves aws/gcp/local actually keep the module
+  # contract ARCHITECTURE.md documents, rather than relying on the prose
+  # staying in sync with the code by discipline alone.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 infra/contract_check.py
+
+  # terraform validate only checks syntax/schema against the provider's
+  # own resource definitions — it needs provider plugins, never real
+  # cloud credentials. This is the only form of testing the aws/gcp
+  # backends get here: they've never been applied against real infra.
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - infra/modules/network/aws
+          - infra/modules/network/gcp
+          - infra/modules/network/local
+          - infra/modules/cluster/aws
+          - infra/modules/cluster/gcp
+          - infra/modules/cluster/local
+          - infra/modules/database/aws
+          - infra/modules/database/gcp
+          - infra/modules/database/local
+          - infra/modules/tiers
+          - infra/platform
+          - infra/live/aws
+          - infra/live/gcp
+          - infra/live/local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - run: terraform init -backend=false
+        working-directory: ${{ matrix.module }}
+      - run: terraform validate
+        working-directory: ${{ matrix.module }}

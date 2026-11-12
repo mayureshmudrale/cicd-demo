@@ -1,0 +1,6 @@
+Idea Board deployed as {{ .Release.Name }}.
+{{- if .Values.ingress.enabled }}
+Visit http://{{ .Values.ingress.host }}/ once your ingress controller has an address.
+{{- else }}
+Ingress is disabled; port-forward the frontend/backend services directly.
+{{- end }}

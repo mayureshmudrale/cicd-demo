@@ -1,0 +1,251 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # Feature #6 (test selection): on a PR, picks which backend tests are
+  # worth running for the actual diff instead of always running every
+  # test. Skipped on a plain push (no PR base to diff against) — the
+  # `backend` job's fallback to `tests/` then just runs everything, same
+  # as this job's own GeminiUnavailable fallback does.
+  test-select:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.select.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+        working-directory: ai
+      - id: select
+        # Runs from app/backend (matching where the `backend` job's pytest
+        # step runs pytest from) so the printed test paths are valid
+        # relative to that cwd — `git diff` itself still returns
+        # repo-root-relative paths regardless of cwd, which is fine since
+        # only basenames are compared (ai/testsel/select.py's direct-match
+        # floor).
+        working-directory: app/backend
+        run: |
+          python -m ai.testsel \
+            --base "origin/${{ github.event.pull_request.base.ref }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --test-root tests > selection.txt
+          cat selection.txt
+          {
+            echo "tests<<EOF"
+            grep -v '^#' selection.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+
+  backend:
+    needs: [test-select]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+        working-directory: app/backend
+      - run: ruff check .
+        working-directory: app/backend
+      - run: pytest ${{ needs.test-select.outputs.tests != '' && needs.test-select.outputs.tests || 'tests/' }} -v
+        working-directory: app/backend
+        env:
+          DATABASE_URL: "sqlite:///./ci.db"
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4317"
+
+  # Self-healing CI: only runs when `backend` actually failed. Re-runs the
+  # same lint command for real, proposes a fix via Gemini, and verifies it
+  # in a disposable worktree against BOTH the original command and the
+  # full test suite (--safety-cmd) before ever committing anything. On
+  # success, opens a small draft PR against the FAILING PR's own branch
+  # (not main) — "here's a fix for your branch" — never merges it, and
+  # never commits/pushes anything if the proposed fix doesn't actually
+  # verify (ai/selfheal/apply.py's gate, not Gemini's say-so).
+  self-heal:
+    needs: [backend]
+    if: failure() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+        working-directory: ai
+      - run: pip install -r requirements-dev.txt
+        working-directory: app/backend
+      - run: |
+          python -m ai.selfheal \
+            --cmd "ruff check ." \
+            --cwd app/backend \
+            --safety-cmd "pytest tests/" \
+            --branch "heal/${{ github.event.pull_request.number }}-${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --base "${{ github.event.pull_request.head.ref }}"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: "sqlite:///./ci.db"
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4317"
+
+  # Blast radius gatekeeper: on a PR, statically analyzes any changed SQL
+  # migration file and diffs the backend's OpenAPI contract against the
+  # PR's base ref for breaking changes. The pass/requires_approval verdict
+  # itself is fully deterministic (ai/gatekeeper/gate.py); Gemini only
+  # writes the human summary/remediation plan, never the gate decision.
+  # Terraform-plan analysis (ai/gatekeeper/terraform_risk.py) is real and
+  # tested but deliberately not wired here: this backend's state lives on
+  # whoever applied it, not in CI, so a fresh runner has nothing to plan
+  # against — see the README for how it was verified against this repo's
+  # own real infra instead.
+  blast-radius:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt && pip install -r ../app/backend/requirements.txt
+        working-directory: ai
+      - name: Gather changed SQL migrations and the OpenAPI before/after
+        id: gather
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git diff --name-only "origin/$BASE...HEAD" -- '*.sql' > /tmp/sql_files.txt || true
+
+          DATABASE_URL="sqlite:///./ci.db" python -c "
+          import json, sys
+          sys.path.insert(0, 'app/backend')
+          from main import app
+          json.dump(app.openapi(), open('/tmp/openapi_after.json', 'w'))
+          "
+
+          # Best-effort: the base ref's version of the backend may not
+          # import cleanly against HEAD's dependency set (or may not
+          # exist at all yet, e.g. this repo's own first commit) — skip
+          # the contract check rather than fail the whole job.
+          if git show "origin/$BASE:app/backend/main.py" > /dev/null 2>&1; then
+            git worktree add /tmp/base-worktree "origin/$BASE" -q
+            DATABASE_URL="sqlite:///./ci.db" python -c "
+          import json, sys
+          sys.path.insert(0, '/tmp/base-worktree/app/backend')
+          from main import app
+          json.dump(app.openapi(), open('/tmp/openapi_before.json', 'w'))
+          " && echo "has_before=true" >> "$GITHUB_OUTPUT" || echo "has_before=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_before=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run the gatekeeper
+        run: |
+          ARGS=""
+          if [ -s /tmp/sql_files.txt ]; then
+            ARGS="$ARGS --sql $(cat /tmp/sql_files.txt | tr '\n' ' ')"
+          fi
+          if [ "${{ steps.gather.outputs.has_before }}" = "true" ]; then
+            ARGS="$ARGS --openapi-before /tmp/openapi_before.json --openapi-after /tmp/openapi_after.json"
+          fi
+          python -m ai.gatekeeper $ARGS
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+  # Review memory: reviews every changed hunk on its own merits (never
+  # limited to re-surfacing history), using a small seed corpus of past
+  # human review comments as optional context — ai/reviewmem/retrieve.py
+  # finds similar past comments, but review.py's own Gemini call decides
+  # independently whether a real issue exists and whether a past comment
+  # genuinely applies (grounded_in) or this is a new observation (null).
+  # Posts one consolidated PR comment when there's something to report,
+  # via `gh` (uses the default GITHUB_TOKEN — no extra secret needed); a
+  # human review is still the final gate, this just runs before it.
+  #
+  # Known limitation, left as-is rather than worked around: this trigger
+  # (`pull_request`, not `pull_request_target`) gives GITHUB_TOKEN read-only
+  # access for PRs from forks, so posting will fail there. Switching to
+  # `pull_request_target` would fix that, but runs the workflow with
+  # write-token access while still checking out the fork's own (untrusted)
+  # code — a well-known GitHub Actions security footgun — so it isn't
+  # done here without also isolating "run untrusted code" from "post with
+  # write access" into separate jobs.
+  review-memory:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+        working-directory: ai
+      - run: |
+          git diff "origin/${{ github.event.pull_request.base.ref }}...HEAD" > /tmp/review.diff || true
+          python -m ai.reviewmem \
+            --diff /tmp/review.diff \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number || 0 }}"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYTHONPATH: ${{ github.workspace }}
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+        working-directory: app/frontend
+      - run: npm run build
+        working-directory: app/frontend
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.2"
+      - run: helm lint deploy/helm/idea-board -f deploy/helm/idea-board/values-local.yaml
+
+  images:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t idea-board-${{ matrix.component }}:ci app/${{ matrix.component }}
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: idea-board-${{ matrix.component }}:ci
+          version: "v0.70.0"
+          severity: "CRITICAL"
+          exit-code: "1"

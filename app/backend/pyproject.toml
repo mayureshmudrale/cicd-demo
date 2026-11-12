@@ -1,0 +1,12 @@
+[tool.ruff.lint]
+select = ["E", "F", "B", "UP"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom calls Depends()/Depends(get_db) as an
+# argument default by design; B008 doesn't know that pattern.
+extend-immutable-calls = ["fastapi.Depends"]
+
+[tool.pytest.ini_options]
+# So `main.py` etc. import correctly whether CI invokes `pytest` directly
+# or `python -m pytest` (which adds cwd to sys.path itself).
+pythonpath = ["."]

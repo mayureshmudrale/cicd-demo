@@ -1,0 +1,83 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    {{- include "idea-board.backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      {{- include "idea-board.backend.labels" . | nindent 6 }}
+  strategy:
+    canary:
+      # Static steps always drive the actual rollout. The AI routing
+      # AnalysisTemplate below runs alongside them (background analysis),
+      # not instead of them — in shadow mode it only observes and logs;
+      # a later phase can make it gate for real once it's proven itself.
+      steps:
+        {{- toYaml .Values.backend.canary.steps | nindent 8 }}
+      {{- if .Values.backend.canary.aiRouting.enabled }}
+      analysis:
+        templates:
+          - templateName: {{ .Release.Name }}-ai-routing
+        args:
+          # Lets the AI evaluator query Mimir for this specific canary's own
+          # live metrics instead of guessing which ReplicaSet is which.
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: latest-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+      {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "idea-board.backend.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.backend.port }}
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.backend.database.secretName }}, key: host }
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.backend.database.secretName }}, key: port }
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.backend.database.secretName }}, key: dbname }
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.backend.database.secretName }}, key: user }
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.backend.database.secretName }}, key: password }
+            # Kubernetes expands $(VAR) references to earlier env entries in
+            # this same list (no shell involved), composing the SQLAlchemy
+            # URL from the CNPG secret's discrete fields.
+            - name: DATABASE_URL
+              value: "postgresql+psycopg://$(PGUSER):$(PGPASSWORD)@$(PGHOST):$(PGPORT)/$(PGDATABASE)"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.backend.otel.endpoint | quote }}
+            - name: FAULT_MODE
+              value: {{ .Values.backend.faultMode | quote }}
+            # Fed into every metric this pod emits (otel.py) so the AI
+            # evaluator can tell canary and stable traffic apart in Mimir.
+            - name: POD_TEMPLATE_HASH
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['rollouts-pod-template-hash']
+          readinessProbe:
+            httpGet: { path: /healthz, port: {{ .Values.backend.port }} }
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: {{ .Values.backend.port }} }
+            initialDelaySeconds: 5
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}

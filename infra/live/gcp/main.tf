@@ -1,0 +1,50 @@
+# Thin root: network -> cluster -> database -> platform, same four-step
+# wiring as infra/live/aws and infra/live/local, same module contract.
+
+module "network" {
+  source = "../../modules/network/gcp"
+  name   = "idea-board"
+  region = var.region
+}
+
+module "tiers" {
+  source = "../../modules/tiers"
+  cloud  = "gcp"
+  tier   = var.tier
+}
+
+module "cluster" {
+  source = "../../modules/cluster/gcp"
+
+  name               = "idea-board"
+  tier               = var.tier
+  network_id         = module.network.network_id
+  private_subnet_ids = module.network.private_subnet_ids
+  region             = var.region
+  node_type          = module.tiers.node_type
+  node_count         = module.tiers.node_count
+}
+
+module "database" {
+  source = "../../modules/database/gcp"
+
+  name       = "idea-board"
+  tier       = var.tier
+  network_id = module.network.network_id
+  region     = var.region
+  db_class   = module.tiers.db_class
+  ha         = module.tiers.db_ha
+
+  depends_on = [module.cluster]
+}
+
+module "platform" {
+  source = "../../platform"
+
+  ingress_service_type = "LoadBalancer"
+  ingress_annotations  = module.cluster.ingress_annotations
+  ai_evaluator_image   = var.ai_evaluator_image
+  gemini_api_key       = var.gemini_api_key
+
+  depends_on = [module.cluster]
+}

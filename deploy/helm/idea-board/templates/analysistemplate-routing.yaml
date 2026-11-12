@@ -1,0 +1,32 @@
+{{- if .Values.backend.canary.aiRouting.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .Release.Name }}-ai-routing
+spec:
+  args:
+    - name: stable-hash
+    - name: latest-hash
+  metrics:
+    - name: ai-routing
+      interval: 15s
+      # Shadow mode is enforced on the evaluator (AI_MODE_ROUTING), which
+      # always reports "advance" regardless of its real verdict; this high
+      # failureLimit is belt-and-suspenders so a flipped env var alone can't
+      # start gating the rollout.
+      failureLimit: 999
+      provider:
+        web:
+          url: {{ .Values.backend.canary.aiRouting.evaluatorUrl | quote }}
+          method: POST
+          timeoutSeconds: 10
+          jsonBody:
+            # Argo supplies these (backend-rollout.yaml's analysis.args, via
+            # valueFrom.podTemplateHashValue) so the evaluator can query Mimir
+            # for this specific canary's own live metrics (ai/evaluator/metrics.py)
+            # rather than being handed a value it has no way to compute itself.
+            canary_hash: "{{ "{{" }} args.latest-hash {{ "}}" }}"
+            stable_hash: "{{ "{{" }} args.stable-hash {{ "}}" }}"
+          jsonPath: "{$.action}"
+      successCondition: "result == 'advance'"
+{{- end }}
