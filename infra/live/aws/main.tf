@@ -49,3 +49,31 @@ module "platform" {
 
   depends_on = [module.cluster]
 }
+
+# RDS has no equivalent of CNPG writing its own in-cluster secret, so the
+# live root builds one itself, shaped exactly like CNPG's "<name>-app"
+# secret (same keys: host/port/dbname/user/password) — the app chart's
+# backend-rollout.yaml reads this name either way, with zero cloud
+# conditionals in the chart itself.
+resource "kubernetes_namespace" "ideaboard" {
+  metadata {
+    name = "ideaboard"
+  }
+
+  depends_on = [module.cluster]
+}
+
+resource "kubernetes_secret" "ideaboard_app" {
+  metadata {
+    name      = "ideaboard-app"
+    namespace = kubernetes_namespace.ideaboard.metadata[0].name
+  }
+
+  data = {
+    host     = module.database.host
+    port     = tostring(module.database.port)
+    dbname   = module.database.db_name
+    user     = module.database.username
+    password = module.database.password
+  }
+}

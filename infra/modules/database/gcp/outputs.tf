@@ -10,3 +10,19 @@ output "host" {
 output "port" {
   value = 5432
 }
+
+# Same rationale as database/aws's identical trio: the live root needs
+# these discrete fields to build an in-cluster secret shaped like CNPG's,
+# since Cloud SQL has no operator writing one for it the way local does.
+output "username" {
+  value = google_sql_user.this.name
+}
+
+output "db_name" {
+  value = google_sql_database.this.name
+}
+
+output "password" {
+  value     = random_password.master.result
+  sensitive = true
+}
