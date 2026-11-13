@@ -17,7 +17,11 @@ from .redact import redact
 T = TypeVar("T", bound=BaseModel)
 
 PROMPT_VERSION = "v1"
-DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+# 3.5, not the newer 3.8: confirmed live that 3.8-flash was returning
+# sustained 503 "high demand" errors (a newly-GA flagship under heavy
+# load), while 3.5-flash answered reliably every time - stability over
+# novelty for a CI-embedded call with no retry-on-503 path.
+DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 DEFAULT_TIMEOUT_S = int(os.environ.get("GEMINI_TIMEOUT_S", "20"))
 DEFAULT_MAX_OUTPUT_TOKENS = 2048
 CALL_BUDGET_PER_RUN = int(os.environ.get("GEMINI_CALL_BUDGET", "20"))
