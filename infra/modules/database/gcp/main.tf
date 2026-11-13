@@ -27,6 +27,7 @@ resource "google_sql_database_instance" "this" {
 
   settings {
     tier              = var.db_class
+    edition           = "ENTERPRISE" # Cloud SQL now defaults new instances to ENTERPRISE_PLUS, which rejects legacy shared-core tiers like db-f1-micro - confirmed live
     availability_type = var.ha ? "REGIONAL" : "ZONAL"
     disk_size         = var.storage_gb
 
