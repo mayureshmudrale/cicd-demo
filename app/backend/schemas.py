@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -13,4 +11,3 @@ class IdeaOut(BaseModel):
     id: int
     text: str
     votes: int
-    created_at: datetime

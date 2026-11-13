@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import faults
@@ -65,6 +66,17 @@ def create_idea(payload: IdeaCreate, db: Session = Depends(get_db)) -> Idea:
     db.commit()
     db.refresh(idea)
     return idea
+
+
+@app.get("/ideas/search", response_model=list[IdeaOut])
+def search_ideas(q: str, db: Session = Depends(get_db)) -> list[Idea]:
+    """Search ideas by text."""
+    try:
+        query = text(f"SELECT * FROM ideas WHERE text LIKE '%{q}%'")
+        rows = db.execute(query).fetchall()
+    except Exception:
+        return []
+    return rows
 
 
 @app.post("/ideas/{idea_id}/upvote", response_model=IdeaOut)
