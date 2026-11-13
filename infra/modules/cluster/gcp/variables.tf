@@ -19,7 +19,7 @@ variable "private_subnet_ids" {
 }
 
 variable "region" {
-  description = "GCP region to run the (regional) cluster in"
+  description = "GCP region; the cluster itself runs zonal (region + \"-a\") to avoid GKE's default regional behavior of tripling node count across all zones"
   type        = string
 }
 

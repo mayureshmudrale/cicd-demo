@@ -1,5 +1,16 @@
 data "google_client_config" "this" {}
 
+# Zonal, not regional: a regional cluster (location = a region) spreads its
+# default node pool across every zone in that region automatically, so
+# node_count nodes becomes node_count * 3 actual nodes with zero visible
+# warning - confirmed live (quota exhaustion on a trial project surfaced
+# it, but it would have silently tripled node cost on a real account too).
+# Single-zone is the right default for this tier; multi-zone HA is a
+# deliberate upgrade a real deployment should opt into, not inherit free.
+locals {
+  zone = "${var.region}-a"
+}
+
 resource "google_service_account" "node" {
   account_id   = "${var.name}-gke-node"
   display_name = "GKE nodes for ${var.name}"
@@ -25,7 +36,7 @@ resource "google_project_iam_member" "node" {
 # machine type/count/service account instead of inheriting GKE's defaults.
 resource "google_container_cluster" "this" {
   name     = var.name
-  location = var.region
+  location = local.zone
 
   network    = var.network_id
   subnetwork = var.private_subnet_ids[0]
@@ -60,7 +71,7 @@ resource "google_container_cluster" "this" {
 resource "google_container_node_pool" "this" {
   name     = "${var.name}-default"
   cluster  = google_container_cluster.this.id
-  location = var.region
+  location = local.zone
 
   node_count = var.node_count
 
