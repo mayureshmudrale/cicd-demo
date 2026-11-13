@@ -32,6 +32,12 @@ resource "google_container_cluster" "this" {
 
   initial_node_count = 0
 
+  # POC default, same documented posture as database/gcp's Cloud SQL
+  # instance: a real deployment should drop this and let destroys be
+  # deliberate. Without it the provider's own default (true, as of recent
+  # versions) blocks any replace/destroy - confirmed live.
+  deletion_protection = false
+
   min_master_version = var.kubernetes_version == "latest" ? null : var.kubernetes_version
 
   networking_mode = "VPC_NATIVE"
