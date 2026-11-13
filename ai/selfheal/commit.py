@@ -1,9 +1,12 @@
 """Commits a verified HealResult to a new branch — via a disposable
 worktree, same as apply.py, so this never touches whatever the caller
 currently has checked out or any uncommitted changes there. The branch
-itself does persist in the repo after the worktree is removed (a
-worktree is just a checkout of a branch, not the branch itself); opening
-it as a draft PR is a separate, explicit step in post.py.
+itself does persist in the *local* repo after the worktree is removed
+(a worktree is just a checkout of a branch, not the branch itself), but
+that's not enough on a CI runner - confirmed live: the whole checkout is
+ephemeral, so the branch must be pushed to origin here, before the
+worktree goes away, or post.py's `gh pr create --head` has nothing to
+point at.
 """
 
 import subprocess
@@ -38,6 +41,11 @@ def commit_to_branch(repo_root: Path, branch: str, result: HealResult) -> None:
                     "-m",
                     f"self-heal: {result.explanation}",
                 ],
+                cwd=worktree,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "push", "origin", branch],
                 cwd=worktree,
                 check=True,
             )
