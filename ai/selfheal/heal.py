@@ -47,5 +47,6 @@ def propose_fix(
         return generate(
             feature="selfheal", prompt=prompt, response_schema=PatchProposal
         )
-    except GeminiUnavailable:
+    except GeminiUnavailable as exc:
+        print(f"TEMP DIAGNOSTIC propose_fix GeminiUnavailable: {exc}")
         return None
