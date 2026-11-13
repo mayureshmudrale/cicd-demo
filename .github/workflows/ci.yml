@@ -172,6 +172,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LIVE: "1"
+          GEMINI_MODEL: "gemini-3.5-flash" # TEMP: testing whether 3.8-flash's 503s are model-specific overload
 
   # Review memory: reviews every changed hunk on its own merits (never
   # limited to re-surfacing history), using a small seed corpus of past
