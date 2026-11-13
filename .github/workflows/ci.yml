@@ -46,6 +46,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIVE: "1"
           PYTHONPATH: ${{ github.workspace }}
 
   backend:
@@ -101,6 +102,7 @@ jobs:
             --base "${{ github.event.pull_request.head.ref }}"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIVE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PYTHONPATH: ${{ github.workspace }}
           DATABASE_URL: "sqlite:///./ci.db"
@@ -169,6 +171,7 @@ jobs:
           python -m ai.gatekeeper $ARGS
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIVE: "1"
 
   # Review memory: reviews every changed hunk on its own merits (never
   # limited to re-surfacing history), using a small seed corpus of past
@@ -213,6 +216,7 @@ jobs:
             --pr "${{ github.event.pull_request.number || 0 }}"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIVE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PYTHONPATH: ${{ github.workspace }}
 
