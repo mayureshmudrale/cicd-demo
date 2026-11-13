@@ -3,7 +3,7 @@ locals {
   tiers = {
     small = {
       aws   = { node_type = "t3.medium", node_count = 2, db_class = "db.t4g.micro", db_ha = false }
-      gcp   = { node_type = "e2-medium", node_count = 2, db_class = "db-f1-micro", db_ha = false }
+      gcp   = { node_type = "e2-medium", node_count = 1, db_class = "db-f1-micro", db_ha = false }
       local = { node_type = "kind-node", node_count = 1, db_class = "shared", db_ha = false }
     }
     medium = {
