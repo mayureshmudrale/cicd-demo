@@ -17,10 +17,12 @@ resource "google_project_iam_member" "node" {
   member  = "serviceAccount:${google_service_account.node.email}"
 }
 
-# node_config/remove_default_node_pool: GKE always creates a default pool
-# alongside the cluster resource itself; removing it and defining the
-# "this" pool below separately is the standard way to control its machine
-# type/count/service account instead of inheriting GKE's own defaults.
+# initial_node_count = 0, remove_default_node_pool left at its false
+# default: with 0, GKE never creates a default pool in the first place
+# (confirmed live - remove_default_node_pool = true here 404s trying to
+# delete a pool that was never created), so there's nothing to remove.
+# The "this" pool below is defined separately either way, to control its
+# machine type/count/service account instead of inheriting GKE's defaults.
 resource "google_container_cluster" "this" {
   name     = var.name
   location = var.region
@@ -28,8 +30,7 @@ resource "google_container_cluster" "this" {
   network    = var.network_id
   subnetwork = var.private_subnet_ids[0]
 
-  remove_default_node_pool = true
-  initial_node_count       = 0 # GKE's current guidance: 0 avoids even transiently creating the default pool we're about to remove
+  initial_node_count = 0
 
   min_master_version = var.kubernetes_version == "latest" ? null : var.kubernetes_version
 
