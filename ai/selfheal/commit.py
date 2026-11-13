@@ -28,7 +28,16 @@ def commit_to_branch(repo_root: Path, branch: str, result: HealResult) -> None:
                 (worktree / edit.path).write_text(edit.new_content)
             subprocess.run(["git", "add", "."], cwd=worktree, check=True)
             subprocess.run(
-                ["git", "commit", "-m", f"self-heal: {result.explanation}"],
+                [
+                    "git",
+                    "-c",
+                    "user.name=github-actions[bot]",
+                    "-c",
+                    "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+                    "commit",
+                    "-m",
+                    f"self-heal: {result.explanation}",
+                ],
                 cwd=worktree,
                 check=True,
             )
