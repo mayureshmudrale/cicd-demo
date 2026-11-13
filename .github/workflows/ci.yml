@@ -159,6 +159,22 @@ jobs:
           else
             echo "has_before=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: TEMP diagnostic - raw Gemini call
+        run: |
+          python -c "
+          from ai.llm.client import generate
+          from pydantic import BaseModel
+          class Reply(BaseModel):
+              ok: bool
+          try:
+              r = generate(feature='diag', prompt='Reply with {\"ok\": true}', response_schema=Reply)
+              print('LIVE CALL SUCCEEDED:', r)
+          except Exception as exc:
+              print('LIVE CALL FAILED:', type(exc).__name__, str(exc))
+          "
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIVE: "1"
       - name: Run the gatekeeper
         run: |
           ARGS=""
