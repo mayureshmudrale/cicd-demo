@@ -284,29 +284,98 @@ real corpus would come from GitHub's API:
   overruled) — otherwise the corpus teaches the model to repeat advice
   that was actually rejected.
 
-Not yet built: AWS/GCP modules, the rest of the pipeline (`deploy.yml`,
-`sandbox.yml`, etc.), the sim/fault-injection harness, and two of the five
-original AI features (profiling, drift detection) — RCA (#1), adaptive
-canary routing (#4), and test selection (#6) are done, see above.
-NetworkPolicy generation (#3) was dropped from scope; the blast-radius
-gatekeeper above is a new feature added beyond the original six.
+AWS/GCP modules, `deploy.yml`, and three features beyond the original
+six (blast-radius gatekeeper, review-memory, self-heal) are built and
+covered elsewhere in this README. Not yet built: the sim/fault-injection
+harness, and two of the five original AI features (profiling, drift
+detection) — RCA (#1), adaptive canary routing (#4), and test selection
+(#6) are done, see above. NetworkPolicy generation (#3) was dropped
+from scope.
 
 ### Prerequisites
 
-- OrbStack running, with `kind`, `kubectl`, `helm`, and Terraform ≥ 1.7
-  on PATH.
-- A free-tier Gemini API key, for the AI smoke test.
+- OrbStack (or Docker Desktop) running, with `kind`, `kubectl`, `helm`,
+  and Terraform ≥ 1.7 on PATH.
+- A free-tier Gemini API key — optional. Every AI feature has a
+  deterministic fallback and works without one; set it to see the real
+  model output instead of the fallback path.
 
-### Bring up the local stack
+### 1. Bring up the cluster
 
 ```sh
 make apply-local
 ```
 
-This creates `cloud-a` and `cloud-b` kind clusters (set `enable_cloud_b =
-false` via `-var` to skip cloud-b and save RAM), installs Cilium in each,
-and installs CloudNativePG with a single-instance Postgres cluster per
-backend.
+This creates `cloud-a` (and `cloud-b`, unless you pass `-var
+enable_cloud_b=false` to save RAM) kind clusters, installs Cilium,
+CloudNativePG (a single-instance Postgres cluster per backend), and the
+cloud-neutral platform layer — `ingress-nginx`, Argo Rollouts,
+`otel-lgtm` (Grafana/Tempo/Mimir/Loki in one container), and the
+`ai-evaluator` service.
+
+All `kubectl`/`helm` commands below target `cloud-a` through its own
+kubeconfig file, kept separate from your default `~/.kube/config` on
+purpose:
+
+```sh
+export KUBECONFIG=infra/live/local/.kubeconfig-cloud-a
+```
+
+### 2. Build the app images and load them into the cluster
+
+`kind` clusters don't pull from a registry for local dev — images load
+directly from your Docker daemon:
+
+```sh
+docker build -t idea-board-backend:local app/backend
+docker build -t idea-board-frontend:local app/frontend
+kind load docker-image idea-board-backend:local --name cloud-a
+kind load docker-image idea-board-frontend:local --name cloud-a
+```
+
+### 3. Deploy the app
+
+```sh
+helm install idea-board deploy/helm/idea-board \
+  --namespace ideaboard --create-namespace \
+  -f deploy/helm/idea-board/values-local.yaml
+```
+
+`values-local.yaml` sets `pullPolicy: Never` (use whatever's already
+loaded, never attempt a registry pull) and trims resource requests to
+fit a laptop. Watch it come up:
+
+```sh
+kubectl -n ideaboard get pods -w
+```
+
+### 4. Reach the app
+
+Simplest path — port-forward straight to the services, bypassing
+ingress entirely:
+
+```sh
+kubectl -n ideaboard port-forward svc/idea-board-frontend 8080:80 &
+kubectl -n ideaboard port-forward svc/idea-board-backend 8000:8000 &
+```
+
+Then:
+
+```sh
+open http://localhost:8080/                      # the UI
+curl http://localhost:8000/healthz                # {"status":"ok"}
+curl -X POST http://localhost:8000/ideas \
+  -H "Content-Type: application/json" \
+  -d '{"text":"my first idea"}'
+curl http://localhost:8000/ideas                  # lists it back
+```
+
+(The chart also renders two `Ingress` objects for `idea-board.local`,
+matching the real cloud deploys — but kind's ingress controller has no
+external IP locally, so port-forwarding is the reliable path for local
+dev.)
+
+### 5. Tear down
 
 ```sh
 make destroy-local
