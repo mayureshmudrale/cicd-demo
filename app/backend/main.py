@@ -32,9 +32,21 @@ instrument(app, SessionLocal().bind)
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     """Records every request's status/latency for the AI evaluator's canary
-    health query (ai/evaluator/metrics.py), labeled by pod_template_hash."""
+    health query (ai/evaluator/metrics.py), labeled by pod_template_hash.
+
+    An unhandled exception (FAULT_MODE=panic) makes call_next raise instead
+    of returning - confirmed live, this silently dropped every crashed
+    request from the metric ai/routing's hard guard depends on, since the
+    500 Starlette eventually returns happens above this middleware. Record
+    it as a 500 here too, then re-raise so Starlette's own handling is
+    unchanged.
+    """
     start = time.perf_counter()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        record_request(500, (time.perf_counter() - start) * 1000)
+        raise
     record_request(response.status_code, (time.perf_counter() - start) * 1000)
     return response
 
