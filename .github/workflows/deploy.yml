@@ -57,13 +57,16 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "${{ steps.ecr.outputs.registry }}"
 
-          docker build -t "${{ steps.ecr.outputs.backend_uri }}" app/backend
+          # --provenance=false: BuildKit's default attestation manifest push
+          # does a HEAD check this account's scoped ECR policy doesn't grant
+          # (ecr:BatchGetImage) and isn't needed for a POC image anyway.
+          docker build --provenance=false -t "${{ steps.ecr.outputs.backend_uri }}" app/backend
           docker push "${{ steps.ecr.outputs.backend_uri }}"
 
-          docker build -t "${{ steps.ecr.outputs.frontend_uri }}" app/frontend
+          docker build --provenance=false -t "${{ steps.ecr.outputs.frontend_uri }}" app/frontend
           docker push "${{ steps.ecr.outputs.frontend_uri }}"
 
-          docker build -f ai/evaluator/Dockerfile -t "${{ steps.ecr.outputs.evaluator_uri }}" ai/
+          docker build --provenance=false -f ai/evaluator/Dockerfile -t "${{ steps.ecr.outputs.evaluator_uri }}" ai/
           docker push "${{ steps.ecr.outputs.evaluator_uri }}"
 
       - uses: hashicorp/setup-terraform@v3
