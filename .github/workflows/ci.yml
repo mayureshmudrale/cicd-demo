@@ -193,6 +193,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+      contents: read # listing *any* permissions zeroes out the rest, including
+      # checkout's implicit read access - confirmed live (actions/checkout
+      # failed with "Repository not found" without this)
     steps:
       - uses: actions/checkout@v4
         with:
