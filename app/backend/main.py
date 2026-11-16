@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import faults
@@ -66,6 +67,16 @@ def list_ideas(db: Session = Depends(get_db)) -> list[Idea]:
     ideas = db.query(Idea).order_by(Idea.created_at.desc()).all()
     faults.simulate_n_plus_one(db, [idea.id for idea in ideas])
     return ideas
+
+
+@app.get("/ideas/search")
+def search_ideas(q: str, db: Session = Depends(get_db)):
+    """Search ideas by a free-text substring match."""
+    try:
+        rows = db.execute(text(f"SELECT * FROM ideas WHERE text LIKE '%{q}%'"))
+        return [dict(row._mapping) for row in rows]
+    except Exception:
+        return []
 
 
 @app.post("/ideas", response_model=IdeaOut, status_code=201)
